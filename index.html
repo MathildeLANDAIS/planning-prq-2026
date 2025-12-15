@@ -287,7 +287,7 @@
 
     // === My PRQ (local) ===
     // We store the delete_secret locally so user can delete only their PRQ.
-    const MY_KEY = 'my_prq_2026_v1';
+    const MY_KEY = 'my_prq_2026_v2';
     /** @type {{id:string, delete_secret:string, date:string, type:string, ville:string}[]} */
     let myList = [];
 
@@ -492,13 +492,13 @@
         const div = document.createElement('div');
         div.className = 'event-item';
 
-        const desc = `${item.type} + ${item.ville}`;
+        const desc = `PRQ ${item.type} ${item.ville}`;
         const agendaUrl = buildAgendaUrl(item.date, desc);
 
         div.innerHTML = `
           <div class='event-left'>
             <strong>${item.date.split('-').reverse().join('/')}</strong>
-            <span>${desc}</span>
+            <span>PRQ ${item.type} ${item.ville}</span>
           </div>
           <a class='agenda-link' href="${agendaUrl}" target="_blank" rel="noopener">Google Agenda</a>
           <button class='delete-btn' type='button'>Supprimer</button>
