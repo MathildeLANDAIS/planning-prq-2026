@@ -566,10 +566,14 @@
         if (dow === 0 || dow === 6) continue; // week-end masqué
 
         if (lastMonth === null || d.getMonth() !== lastMonth) {
-          addMonthSeparator(d.getMonth());
+        // Avant de passer au mois suivant, on affiche la semaine incomplète du mois précédent
+        if (week.length) {
+          renderWeek(week);
           week = [];
-          lastMonth = d.getMonth();
         }
+        addMonthSeparator(d.getMonth());
+        lastMonth = d.getMonth();
+      }
 
         if (week.length === 0 && dow !== 1) {
           for (let i = 1; i < dow; i++) week.push({ empty: true });
