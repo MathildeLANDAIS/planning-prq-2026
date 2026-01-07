@@ -47,7 +47,6 @@
       margin-right: auto;
     }
 
-    /* cases compactes */
     .day {
       background: white;
       padding: 6px 6px 5px;
@@ -86,7 +85,6 @@
     .events.APV { color: #1d4ed8; }
     .events.VN { color: #f59e0b; }
 
-    /* jours fériés */
     .holiday-mark {
       position:absolute;
       top: 4px;
@@ -98,7 +96,6 @@
     }
     .holiday { outline: 1px solid rgba(209,26,42,0.35); }
 
-    /* popup */
     #form {
       display:none;
       position: fixed;
@@ -124,7 +121,6 @@
     #saveBtn { background:#2563eb; color:white; }
     #closeBtn { background:#888; color:white; }
 
-    /* liste */
     #listWrap { max-width:1100px; margin: 18px auto 0; }
     #list { margin-top:10px; }
     .event-item {
@@ -180,7 +176,6 @@
 
   <div id="calendar"></div>
 
-  <!-- Popup de création PRQ -->
   <div id="form" role="dialog" aria-modal="true">
     <h2 id="dateLabel"></h2>
 
@@ -227,7 +222,11 @@
     // === Supabase config ===
     const SUPABASE_URL = 'https://tjqlvbfllxjfhotkuvrx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcWx2YmZsbHhqZmhvdGt1dnJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4MDEzNTUsImV4cCI6MjA4MTM3NzM1NX0.kVAPjACIepzlScIUhuR23EydemxjAI0s-XMbVgpe5Pg';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ✅ Fix 1: désactiver Realtime (évite les blocages WebSocket sur sites statiques)
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      realtime: { enabled: false }
+    });
 
     // === UI refs ===
     const calendar = document.getElementById('calendar');
@@ -242,7 +241,6 @@
     const weekdaysAbbrev = ['lun','mar','mer','jeu','ven'];
     const monthNames = ['JANVIER','FÉVRIER','MARS','AVRIL','MAI','JUIN','JUILLET','AOÛT','SEPTEMBRE','OCTOBRE','NOVEMBRE','DÉCEMBRE'];
 
-    // Jours fériés 2026 (on filtre automatiquement lun->ven)
     const holidaysAll2026 = {
       "2026-01-01": "Jour de l’an",
       "2026-04-06": "Lundi de Pâques",
@@ -281,14 +279,9 @@
 
     const holidays2026 = buildWeekdayHolidayMap(holidaysAll2026);
 
-    // === Shared PRQ data (from Supabase) ===
-    // sharedByDate: { 'YYYY-MM-DD': [{id, date, type, ville}] }
     let sharedByDate = {};
 
-    // === My PRQ (local) ===
-    // We store the delete_secret locally so user can delete only their PRQ.
     const MY_KEY = 'my_prq_2026_v2';
-    /** @type {{id:string, delete_secret:string, date:string, type:string, ville:string}[]} */
     let myList = [];
 
     function loadMyList() {
@@ -356,8 +349,6 @@
     function toSharedMap(rows) {
       const map = {};
       for (const r of rows) {
-        // r.date might be '2026-01-01' or ISO date-time depending on API;
-        // we normalize to YYYY-MM-DD.
         const dateIso = String(r.date).slice(0, 10);
         if (!map[dateIso]) map[dateIso] = [];
         map[dateIso].push({
@@ -370,12 +361,18 @@
       return map;
     }
 
+    // ✅ Fix 2: afficher l’erreur Supabase au lieu de rester bloqué
+    function showSupabaseError(context, error) {
+      console.error(context, error);
+      const msg = (error && error.message) ? error.message : String(error || 'Erreur inconnue');
+      setStatus(`Erreur Supabase: ${msg}`);
+      alert(`Erreur Supabase (${context}) :\n${msg}`);
+    }
+
     async function fetchShared() {
       setStatus('Chargement des PRQ partagés…');
       refreshBtn.disabled = true;
 
-      // Safety: Supabase Data API has a row limit (you set 1000). If you expect >1000 PRQ,
-      // we can add pagination later.
       const { data, error } = await supabase
         .from('prq_public')
         .select('id,date,type,ville,created_at')
@@ -387,8 +384,7 @@
       refreshBtn.disabled = false;
 
       if (error) {
-        console.error(error);
-        setStatus('Erreur: impossible de charger les PRQ (vérifie Supabase/RLS).');
+        showSupabaseError('fetchShared', error);
         return;
       }
 
@@ -403,19 +399,18 @@
 
       const row = { id, date: dateIso, type, ville, delete_secret };
 
+      // (On garde ton choix : insertion dans la table 'prq' + secret local pour suppression)
       const { error } = await supabase.from('prq').insert(row);
       if (error) throw error;
 
-      // Save locally for "Mes PRQ" + delete rights
       myList.push({ id, delete_secret, date: dateIso, type, ville });
       saveMyList();
 
-      // Optimistic update of shared map
       if (!sharedByDate[dateIso]) sharedByDate[dateIso] = [];
       sharedByDate[dateIso].push({ id, date: dateIso, type, ville });
     }
 
-    async function deletePrq(id, secret, dateIso) {
+    async function deletePrq(id, secret) {
       const { data, error } = await supabase.rpc('delete_prq', { p_id: id, p_secret: secret });
       if (error) throw error;
       return !!data;
@@ -437,8 +432,7 @@
         renderCalendar();
         closeForm();
       } catch (e) {
-        console.error(e);
-        alert('Erreur: impossible d’enregistrer le PRQ.');
+        showSupabaseError('createPrq', e);
         setStatus('Erreur lors de l’enregistrement.');
       } finally {
         saveBtn.disabled = false;
@@ -451,18 +445,16 @@
 
       try {
         setStatus('Suppression…');
-        const success = await deletePrq(item.id, item.delete_secret, item.date);
+        const success = await deletePrq(item.id, item.delete_secret);
         if (!success) {
           alert('Impossible de supprimer (droits manquants ou PRQ déjà supprimé).');
           setStatus('Suppression refusée.');
           return;
         }
 
-        // Remove from my list
         myList = myList.filter(x => x.id !== item.id);
         saveMyList();
 
-        // Remove from shared map (optimistic)
         const arr = sharedByDate[item.date] || [];
         sharedByDate[item.date] = arr.filter(x => x.id !== item.id);
         if (sharedByDate[item.date].length === 0) delete sharedByDate[item.date];
@@ -471,8 +463,7 @@
         renderCalendar();
         setStatus('PRQ supprimé ✅');
       } catch (e) {
-        console.error(e);
-        alert('Erreur: impossible de supprimer.');
+        showSupabaseError('deletePrq', e);
         setStatus('Erreur lors de la suppression.');
       }
     }
@@ -485,7 +476,6 @@
         return;
       }
 
-      // group by date (sorted)
       const sorted = [...myList].sort((a,b) => a.date.localeCompare(b.date));
 
       for (const item of sorted) {
@@ -520,7 +510,7 @@
         }
 
         const dateStr = isoDateLocal(item.date);
-        const dow = item.date.getDay(); // 1..5
+        const dow = item.date.getDay();
 
         div.className = 'day';
         div.dataset.date = dateStr;
@@ -538,7 +528,6 @@
         const abbrev = weekdaysAbbrev[dow - 1] || '';
         div.innerHTML += `<strong>${dayNum}</strong> <em style="color:#666">(${abbrev})</em>`;
 
-        // Aperçu PRQ (inclut ceux de l'utilisateur, car tout est partagé)
         const shared = sharedByDate[dateStr] || [];
         for (const ev of shared) {
           const evSpan = document.createElement('div');
@@ -563,17 +552,16 @@
 
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dow = d.getDay();
-        if (dow === 0 || dow === 6) continue; // week-end masqué
+        if (dow === 0 || dow === 6) continue;
 
         if (lastMonth === null || d.getMonth() !== lastMonth) {
-        // Avant de passer au mois suivant, on affiche la semaine incomplète du mois précédent
-        if (week.length) {
-          renderWeek(week);
-          week = [];
+          if (week.length) {
+            renderWeek(week);
+            week = [];
+          }
+          addMonthSeparator(d.getMonth());
+          lastMonth = d.getMonth();
         }
-        addMonthSeparator(d.getMonth());
-        lastMonth = d.getMonth();
-      }
 
         if (week.length === 0 && dow !== 1) {
           for (let i = 1; i < dow; i++) week.push({ empty: true });
@@ -590,7 +578,6 @@
       if (week.length) renderWeek(week);
     }
 
-    // UX: fermer au clic extérieur + ESC
     document.addEventListener('mousedown', (e) => {
       if (formEl.style.display === 'block' && !formEl.contains(e.target)) {
         const dayCell = e.target.closest && e.target.closest('.day');
@@ -605,18 +592,16 @@
     closeBtn.addEventListener('click', closeForm);
     refreshBtn.addEventListener('click', fetchShared);
 
-    // Debug helpers
     window.__prq = {
       refresh: fetchShared,
       my: () => myList,
       clearMy: () => { localStorage.removeItem(MY_KEY); loadMyList(); renderList(); },
     };
 
-    // Init
     (function init() {
       loadMyList();
       renderList();
-      renderCalendar(); // renders even before shared loads
+      renderCalendar();
       fetchShared();
     })();
   </script>
